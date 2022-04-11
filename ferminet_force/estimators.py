@@ -101,6 +101,7 @@ class LocalForceEstimatorBase(ABC):
 
 
 class EstimatorWithoutEnergy(ABC):
+    """The base class for estimators which do not require local energy."""
     @abstractmethod
     def f_l(self, params: jnp.ndarray, x: jnp.ndarray) -> jnp.ndarray:
         """Calculates the total force.
@@ -115,6 +116,7 @@ class EstimatorWithoutEnergy(ABC):
 
 
 class EstimatorWithEnergy(ABC):
+    """The base class for estimators which require local energy."""
     @abstractmethod
     def f_l(
         self, params: jnp.ndarray, x: jnp.ndarray, e_l: jnp.ndarray
@@ -134,16 +136,26 @@ class EstimatorWithEnergy(ABC):
 
 
 class PrimitiveEstimator(LocalForceEstimatorBase, EstimatorWithoutEnergy):
+    """The naive estimator."""
     def f_l(self, params: jnp.ndarray, x: jnp.ndarray) -> jnp.ndarray:
         ae, _, r_ae, _ = networks.construct_input_features(x, self.atoms)
         return primitive_force(ae, r_ae, self.atoms, self.charges)
 
 
 class PsiMinEstimatorBase(LocalForceEstimatorBase):
+    r"""The base class for estimators based on \tilde{\psi}_{min}
+
+    \tilde{\psi}_{min} is the "minimal" form removing the singular part.
+    Based on R. Assaraf and M. Caffarel, J. Chem. Phys. 119, 10536 (2003).
+    """
     def __init__(self, f: LogFermiNetLike, atoms: jnp.ndarray, charges: jnp.ndarray):
         super().__init__(f, atoms, charges)
 
         def Q(x):
+            """The Q matrix. Shape (natom, ndim).
+
+            Based on Eq. (70) in the paper.
+            """
             ae, _, r_ae, _ = networks.construct_input_features(x, atoms)
             # WHY negative? Direction is not the same as the paper
             return jnp.sum(-charges[..., None] * ae / r_ae, axis=0)
@@ -152,6 +164,11 @@ class PsiMinEstimatorBase(LocalForceEstimatorBase):
 
 
 class PsiMinZVEstimator(PsiMinEstimatorBase, EstimatorWithoutEnergy):
+    r"""Zero-variance estimator based on \tilde{\psi}_{min}.
+
+    Or ZV estimator for short. Eq. (72) in the paper.
+    This estimator does not require local energy.
+    """
     def __init__(self, f: LogFermiNetLike, atoms: jnp.ndarray, charges: jnp.ndarray):
         super().__init__(f, atoms, charges)
         self.grad_Q = jax.jacfwd(self.Q)
@@ -164,6 +181,11 @@ class PsiMinZVEstimator(PsiMinEstimatorBase, EstimatorWithoutEnergy):
 
 
 class PsiMinZVZBEstimator(PsiMinEstimatorBase, EstimatorWithEnergy):
+    r"""Zero-variance zero-bias estimator based on \tilde{\psi}_{min}.
+
+    Or ZVZB estimator for short.  Eq. (73) in the paper.
+    This estimator requires local energy.
+    """
     def __init__(self, f: LogFermiNetLike, atoms: jnp.ndarray, charges: jnp.ndarray):
         super().__init__(f, atoms, charges)
         self.zv_estimator = PsiMinZVEstimator(f, atoms, charges)
@@ -177,6 +199,13 @@ class PsiMinZVZBEstimator(PsiMinEstimatorBase, EstimatorWithEnergy):
 
 
 class PsiDerivEstimatorBase(LocalForceEstimatorBase):
+    r"""The base class for estimators needs the derivative of \log{|\Psi|}.
+
+    Also based on R. Assaraf and M. Caffarel, J. Chem. Phys. 119, 10536 (2003).
+
+    WARNING: The calculation of the derivative is not following the paper, and the
+    result does not look good. Only here for reference.
+    """
     def __init__(self, f: LogFermiNetLike, atoms: jnp.ndarray, charges: jnp.ndarray):
         super().__init__(f, atoms, charges)
 
@@ -190,6 +219,10 @@ class PsiDerivEstimatorBase(LocalForceEstimatorBase):
 
 
 class PsiMinDerivEstimator(PsiDerivEstimatorBase, EstimatorWithEnergy):
+    """Eq. (82) in the paper.
+
+    WARNING: See PsiDerivEstimatorBase.
+    """
     def __init__(self, f: LogFermiNetLike, atoms: jnp.ndarray, charges: jnp.ndarray):
         super().__init__(f, atoms, charges)
         self.zv_estimator = PsiMinZVEstimator(f, atoms, charges)
@@ -203,6 +236,10 @@ class PsiMinDerivEstimator(PsiDerivEstimatorBase, EstimatorWithEnergy):
 
 
 def extended_local_kinetic_energy(f, shape):
+    """Extend the local kinetic energy to allow non-scalar output.
+
+    Used by PsiDerivEstimator.
+    """
     def _lapl_over_f(params, x):
         n = x.shape[0]
         eye = jnp.eye(n)
@@ -219,6 +256,10 @@ def extended_local_kinetic_energy(f, shape):
 
 
 class PsiDerivEstimator(PsiDerivEstimatorBase, EstimatorWithEnergy):
+    """Eq. (79) in the paper with v=0.
+
+    WARNING: See PsiDerivEstimatorBase.
+    """
     def __init__(self, f: LogFermiNetLike, atoms: jnp.ndarray, charges: jnp.ndarray):
         super().__init__(f, atoms, charges)
         self.deriv_ke = extended_local_kinetic_energy(
@@ -300,6 +341,7 @@ def local_energy_atom_exposed(f: LogFermiNetLikeWithAtoms, charges: jnp.ndarray)
 
 
 class LocalEnergyDerivBase(LocalForceEstimatorBase):
+    """The base class prepares the derivative of the local energy and wave function."""
     def __init__(self, f: LogFermiNetLike, atoms: jnp.ndarray, charges: jnp.ndarray):
         super().__init__(f, atoms, charges)
 
@@ -325,9 +367,9 @@ class LocalEnergyDerivBase(LocalForceEstimatorBase):
 
 
 class SWCTEstimator(LocalEnergyDerivBase, EstimatorWithEnergy):
-    """Space warp coordinate transformation
+    """Space warp coordinate transformation estimator.
 
-    Eq 14 of S. Sorella and L. Capriotti, J. Chem. Phys. 133, 234111 (2010).
+    Eq. (14) of S. Sorella and L. Capriotti, J. Chem. Phys. 133, 234111 (2010).
     """
 
     def f_l(
@@ -346,13 +388,13 @@ class SWCTEstimator(LocalEnergyDerivBase, EstimatorWithEnergy):
         return zv_term, -e_l * ev_term_coeff, ev_term_coeff
 
     def omega(self, x: jnp.ndarray) -> jnp.ndarray:
-        """Calculate the \\omega matrix
+        r"""Calculate the \omega matrix
 
         Args:
             x: electron positions. Shape (nelectrons*ndim,).
 
         Returns:
-            \\omega matrix, shape (nelectron, natom, 1)
+            \omega matrix, shape (nelectron, natom, 1)
         """
         _, _, r_ae, _ = networks.construct_input_features(x, self.atoms)
         # Remind r_ae is in shape (nelectron, natom, 1)
@@ -362,14 +404,14 @@ class SWCTEstimator(LocalEnergyDerivBase, EstimatorWithEnergy):
     @partial(jax.vmap, in_axes=(None, 0))
     @partial(jax.jacfwd, argnums=1)
     def omega_jacfwd(self, x: jnp.ndarray) -> jnp.ndarray:
-        """Calculate the derivative for \\omega matrix by electron postion
+        r"""Calculate the derivative for \omega matrix by electron postion
 
         Args:
             x: single electron position. Shape (nelctron, ndim).
                 Shape for undecorated: (ndim,)
 
         Returns:
-            Derivative of \\omega matrix. Shape (nelctron, natom, ndim).
+            Derivative of \omega matrix. Shape (nelctron, natom, ndim).
                 Shape for undecorated: (natom,)
         """
         _, _, r_ae, _ = networks.construct_input_features(x, self.atoms)
