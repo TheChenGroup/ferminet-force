@@ -157,8 +157,7 @@ class PsiMinEstimatorBase(LocalForceEstimatorBase):
             Based on Eq. (70) in the paper.
             """
             ae, _, r_ae, _ = networks.construct_input_features(x, atoms)
-            # WHY negative? Direction is not the same as the paper
-            return jnp.sum(-charges[..., None] * ae / r_ae, axis=0)
+            return jnp.sum(charges[..., None] * ae / r_ae, axis=0)
 
         self.Q = Q
 
@@ -177,7 +176,7 @@ class PsiMinZVEstimator(PsiMinEstimatorBase, EstimatorWithoutEnergy):
     def f_l(self, params: jnp.ndarray, x: jnp.ndarray) -> jnp.ndarray:
         f_aa = primitive_f_aa(self.atoms, self.charges)
         dot_term = jnp.dot(self.grad_Q(x), self.grad_f(params, x))
-        return f_aa - dot_term
+        return f_aa + dot_term
 
 
 class PsiMinZVZBEstimator(PsiMinEstimatorBase, EstimatorWithEnergy):
@@ -195,7 +194,7 @@ class PsiMinZVZBEstimator(PsiMinEstimatorBase, EstimatorWithEnergy):
     ) -> tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]:
         f_zv = self.zv_estimator.f_l(params, x)
         Qx = self.Q(x)
-        return f_zv, 2 * e_l * Qx, -2 * Qx
+        return f_zv, -2 * e_l * Qx, 2 * Qx
 
 
 class PsiDerivEstimatorBase(LocalForceEstimatorBase):
@@ -213,9 +212,8 @@ class PsiDerivEstimatorBase(LocalForceEstimatorBase):
         del f_with_atoms.keywords["atoms"]
         # Remind f returns the log magnitude of the wavefunction
         grad_f_atoms = jax.grad(f_with_atoms, argnums=2)
-        # WHY negative? Direction is not the same as the paper
         # Note \frac{\partial}{\partial \lambda} = - \frac{\partial}{\partial R}
-        self.f_deriv = lambda params, x: -grad_f_atoms(params, x, atoms)
+        self.f_deriv = lambda params, x: grad_f_atoms(params, x, atoms)
 
 
 class PsiMinDerivEstimator(PsiDerivEstimatorBase, EstimatorWithEnergy):
@@ -232,7 +230,7 @@ class PsiMinDerivEstimator(PsiDerivEstimatorBase, EstimatorWithEnergy):
     ) -> tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]:
         f_zv = self.zv_estimator.f_l(params, x)
         f_deriv_val = self.f_deriv(params, x)
-        return f_zv, 2 * e_l * f_deriv_val, -2 * f_deriv_val
+        return f_zv, -2 * e_l * f_deriv_val, 2 * f_deriv_val
 
 
 def extended_local_kinetic_energy(f, shape):
@@ -280,8 +278,8 @@ class PsiDerivEstimator(PsiDerivEstimatorBase, EstimatorWithEnergy):
         return (
             primitive_force(ae, r_ae, self.atoms, self.charges)
             + (deriv_e_l - e_l) * deriv_val,
-            2 * e_l * deriv_val,
-            -2 * deriv_val,
+            -2 * e_l * deriv_val,
+            2 * deriv_val,
         )
 
 
@@ -353,7 +351,6 @@ class LocalEnergyDerivBase(LocalForceEstimatorBase):
         del f_with_atoms.keywords["atoms"]
         # Remind f returns the log magnitude of the wavefunction
         grad_f_atoms = jax.grad(f_with_atoms, argnums=2)
-        # Why positive again? Sorella and Capriotti use the opposite sign as Assaraf
         self.f_deriv_atom = lambda params, x: grad_f_atoms(params, x, atoms)
 
         el_fun = local_energy_atom_exposed(f_with_atoms, charges)
