@@ -65,6 +65,21 @@ def calc_force(
         create_fl_fun: Callable with signature f(network, atoms, charges) which
             returns function fl_fun with signature fl_fun(params, x)
         steps (int, optional): Steps to run inferrence. Defaults to 10.
+        mcmc_steps (int, optional): Steps to run MCMC. Defaults to 10.
+        mcmc_burn_in (int, optional): Burn in steps for MCMC. Defaults to 100.
+        split_chunks (int, optional): Number of chunks to split the data into.
+            Useful when memory is limited. Defaults to None, which means no split.
+        jit_loop (bool, optional): Whether to use JIT-ed loop. Defaults to False.
+
+    Returns:
+        A dict with the following keys:
+          - metadata: Metadata about the run.
+          - force: The force results for all steps.
+          * energy: The energy results for all steps.
+          * zb_term: The zb_term, that is the term involving energy.
+          * term: The coefficient for Ev.
+
+        Terms starting with a star are only present if using LocalEnergySolver.
     """
     restored_params = restore_network(cfg)
     atoms = restored_params["atoms"]
