@@ -56,6 +56,7 @@ def calc_force(
     mcmc_steps: int = 10,
     mcmc_burn_in: int = 100,
     split_chunks: Optional[int] = None,
+    random_seed: Optional[int] = None,
     jit_loop: bool = False,
 ) -> dict[str, Any]:
     """Run force inference for a given molecule.
@@ -74,6 +75,12 @@ def calc_force(
     Returns:
         A dict with the following keys:
           - metadata: Metadata about the run.
+            - version
+            - steps
+            - estimator
+            - mcmc_steps
+            - mcmc_burn_in
+            - seed
           - force: The force results for all steps.
           * energy: The energy results for all steps.
           * pulay_term: The pulay_term, that is the term involving energy.
@@ -89,7 +96,9 @@ def calc_force(
     data = restored_params["data"]
     mcmc_width = restored_params["mcmc_width"]
 
-    key = jax.random.PRNGKey(int(1e6 * time.time()))
+    if random_seed is None:
+        random_seed = int(1e6 * time.time())
+    key = jax.random.PRNGKey(random_seed)
 
     estimator = estimator_class(network, atoms, charges)
     solver: Solver
@@ -150,11 +159,12 @@ def calc_force(
 
     return {
         "metadata": {
-            "version": 4,
+            "version": 5,
             "steps": steps,
             "estimator": estimator_class.__name__,
             "mcmc_steps": mcmc_steps,
             "mcmc_burn_in": mcmc_burn_in,
+            "seed": random_seed,
         },
         **solver.finalize_force(force_all, state),
     }
