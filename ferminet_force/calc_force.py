@@ -97,7 +97,7 @@ def calc_force(
         el_fun = hamiltonian.local_energy(network, atoms, charges)
         solver = LocalEnergySolver(estimator.f_l, el_fun, split_chunks)
     else:
-        solver = SimpleSolver(estimator.f_l)
+        solver = SimpleSolver(estimator.f_l, split_chunks)
 
     InferrenceStepVal = tuple[
         "jax.random.KeyArray", jnp.ndarray, jnp.ndarray, EnergyState
@@ -179,8 +179,9 @@ class Solver(ABC):
 
 
 class SimpleSolver(Solver):
-    def __init__(self, fl_fun):
+    def __init__(self, fl_fun, split_chunks: Optional[int] = None):
         super().__init__(fl_fun)
+        self.split_chunks = split_chunks
         self.batch_local_force = jax.pmap(
             jax.vmap(fl_fun, in_axes=(None, 0), out_axes=0)
         )
@@ -188,7 +189,16 @@ class SimpleSolver(Solver):
     def local_force(
         self, i: jnp.int64, params: jnp.ndarray, data: jnp.ndarray, state: EnergyState
     ) -> tuple[jnp.ndarray, EnergyState]:
-        f_l = self.batch_local_force(params, data)
+        if self.split_chunks is not None:
+            f_l = jnp.concatenate(
+                [
+                    self.batch_local_force(params, data_chunk)
+                    for data_chunk in jnp.split(data, self.split_chunks, axis=1)
+                ]
+            )
+
+        else:
+            f_l = self.batch_local_force(params, data)
         force_result = jnp.mean(f_l, axis=(0, 1))
         return force_result, state
 
