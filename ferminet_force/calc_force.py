@@ -76,8 +76,8 @@ def calc_force(
           - metadata: Metadata about the run.
           - force: The force results for all steps.
           * energy: The energy results for all steps.
-          * zb_term: The zb_term, that is the term involving energy.
-          * term: The coefficient for Ev.
+          * pulay_term: The pulay_term, that is the term involving energy.
+          * pulay_coeff: The coefficient for Ev.
 
         Terms starting with a star are only present if using LocalEnergySolver.
     """
@@ -215,7 +215,7 @@ class LocalEnergySolver(Solver):
     ) -> tuple[jnp.ndarray, EnergyState]:
         e_l = self.batch_local_energy(params, data)
         if self.split_chunks is not None:
-            zv_term, el_term, ev_term_coeff = [
+            hf_term, el_term, ev_term_coeff = [
                 jnp.concatenate(x)
                 for x in zip(
                     *[
@@ -228,7 +228,7 @@ class LocalEnergySolver(Solver):
                 )
             ]
         else:
-            zv_term, el_term, ev_term_coeff = self.batch_local_force(params, data, e_l)
+            hf_term, el_term, ev_term_coeff = self.batch_local_force(params, data, e_l)
         state = EnergyState(
             el_all=state.el_all.at[i].set(jnp.mean(e_l, axis=(0, 1))),
             el_term_all=state.el_term_all.at[i].set(jnp.mean(el_term, axis=(0, 1))),
@@ -236,7 +236,7 @@ class LocalEnergySolver(Solver):
                 jnp.mean(ev_term_coeff, axis=(0, 1))
             ),
         )
-        return jnp.mean(zv_term, axis=(0, 1)), state
+        return jnp.mean(hf_term, axis=(0, 1)), state
 
     @staticmethod
     def finalize_force(
@@ -247,8 +247,8 @@ class LocalEnergySolver(Solver):
         product = state.ev_term_coeff_all * energy_mean
         return {
             "force": force_all + state.el_term_all + product,
-            # zv_term can be calculated by `force - zb_term`
-            "zb_term": state.el_term_all + product,
+            # hf_term can be calculated by `force - pulay_term`
+            "pulay_term": state.el_term_all + product,
             "energy": state.el_all,
-            "term": state.ev_term_coeff_all,
+            "pulay_coeff": state.ev_term_coeff_all,
         }

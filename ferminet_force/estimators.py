@@ -131,9 +131,9 @@ class EstimatorWithEnergy(ABC):
             e_l: Local energy
 
         Returns:
-            zv_term: Shape (natom, ndim). First 2 terms, aka ZV term.
-            el_term: Shape (natom, ndim). E_L term.
-            ev_term_coeff: Shape (natom, ndim). coefficient of E_v term.
+            hf_term: Shape (natom, ndim). First 2 terms, aka Helmann-Fynmann term.
+            el_term: Shape (natom, ndim). The term containing E_L.
+            ev_term_coeff: Shape (natom, ndim). Coefficient of E_v term.
         """
 
 
@@ -425,7 +425,7 @@ class SWCTEstimator(SWCTBase, EstimatorWithEnergy):
     ) -> tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]:
         omega_mat = self.omega(x)
         omega_grad = self.omega_jacfwd(jnp.reshape(x, (-1, 3)))
-        zv_term = -(
+        hf_term = -(
             self.el_deriv_atom(params, x)
             + jnp.sum(omega_mat * self.el_deriv_elec(params, x), axis=0)
         )
@@ -433,7 +433,7 @@ class SWCTEstimator(SWCTBase, EstimatorWithEnergy):
             self.f_deriv_atom(params, x)
             + jnp.sum(omega_mat * self.f_deriv_elec(params, x) + omega_grad / 2, axis=0)
         )
-        return zv_term, -e_l * ev_term_coeff, ev_term_coeff
+        return hf_term, -e_l * ev_term_coeff, ev_term_coeff
 
 
 all_estimators = {
