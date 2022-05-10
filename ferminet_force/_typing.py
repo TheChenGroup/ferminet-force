@@ -13,11 +13,17 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from typing import Protocol, Tuple
+from typing import NamedTuple, Protocol, Tuple
 
 from jax import numpy as jnp
 
 ParamTree = jnp.ndarray
+
+
+class EnergyState(NamedTuple):
+    el_all: jnp.ndarray
+    el_term_all: jnp.ndarray
+    ev_term_coeff_all: jnp.ndarray
 
 
 class FermiNetLike(Protocol):

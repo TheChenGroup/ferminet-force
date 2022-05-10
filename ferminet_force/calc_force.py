@@ -14,26 +14,21 @@
 
 import time
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, Any, NamedTuple, Optional
+from typing import TYPE_CHECKING, Any, Optional
 
 import ferminet.constants
 import ferminet.mcmc
 import jax
-from absl import logging
 from ferminet import hamiltonian
 from jax import numpy as jnp
 
+from ._typing import EnergyState
+from .checkpoint import CheckpointManager, SimpleCheckpointManager
 from .estimators import EstimatorWithEnergy
 from .restore_network import restore_network
 
 if TYPE_CHECKING:
     from ml_collections import ConfigDict
-
-
-class EnergyState(NamedTuple):
-    el_all: jnp.ndarray
-    el_term_all: jnp.ndarray
-    ev_term_coeff_all: jnp.ndarray
 
 
 broadcast_all_local_devices = jax.pmap(lambda x: x)
@@ -57,6 +52,7 @@ def calc_force(
     mcmc_burn_in: int = 100,
     split_chunks: Optional[int] = None,
     random_seed: Optional[int] = None,
+    checkpoint_mgr: Optional[CheckpointManager] = None,
     jit_loop: bool = False,
 ) -> dict[str, Any]:
     """Run force inference for a given molecule.
@@ -88,6 +84,9 @@ def calc_force(
 
         Terms starting with a star are only present if using LocalEnergySolver.
     """
+    if checkpoint_mgr is None:
+        checkpoint_mgr = SimpleCheckpointManager(cfg, estimator_class)
+
     restored_params = restore_network(cfg)
     atoms = restored_params["atoms"]
     charges = restored_params["charges"]
@@ -132,14 +131,10 @@ def calc_force(
         mcmc_step, donate_argnums=1, axis_name=ferminet.constants.PMAP_AXIS_NAME
     )
 
-    force_all = jnp.zeros((steps, len(atoms), 3))
-
     sharded_key = make_different_rng_key_on_all_devices(key)
-    state = EnergyState(
-        el_all=jnp.zeros(steps),
-        el_term_all=jnp.zeros((steps, len(atoms), 3)),
-        ev_term_coeff_all=jnp.zeros((steps, len(atoms), 3)),
-    )
+    init_step, new_data, force_all, state = checkpoint_mgr.restore(steps)
+    if new_data is not None:
+        data = new_data
     init_val: InferrenceStepVal = (sharded_key, data, force_all, state)
 
     for _ in range(mcmc_burn_in):
@@ -148,14 +143,15 @@ def calc_force(
 
     if jit_loop:
         sharded_key, data, force_all, state = jax.lax.fori_loop(
-            0, steps, inferrence_step, init_val
+            init_step, steps, inferrence_step, init_val
         )
     else:
-        for i in range(steps):
+        for i in range(init_step, steps):
             sharded_key, data, force_all, state = inferrence_step(
                 i, (sharded_key, data, force_all, state)
             )
-            logging.log_every_n_seconds(logging.INFO, "Loop %s", 5, i)
+            checkpoint_mgr.save(i, data, force_all, state)
+        checkpoint_mgr.save(i, data, force_all, state, force_save=True)
 
     return {
         "metadata": {
