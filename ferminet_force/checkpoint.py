@@ -158,7 +158,6 @@ class SavingCheckpointManager(CheckpointManager):
                 ckpt_content = jnp.load(ckpt_file)
                 old_steps_to_run = len(ckpt_content["force_all"])
                 old_steps_have_run = jnp.sum(ckpt_content["force_all"][:, 0, 0] != 0)
-                print(type(ckpt_content["force_all"]))
                 assert (
                     old_steps_have_run < steps
                 ), "We have already done that calculation!"
@@ -167,11 +166,9 @@ class SavingCheckpointManager(CheckpointManager):
                         steps, atom_num
                     )
                     steps_to_set = min(steps, old_steps_have_run)
-                    print(ckpt_content["force_all"].shape)
                     force_all = force_all.at[:steps_to_set].set(
                         ckpt_content["force_all"][:steps_to_set]
                     )
-                    print(force_all.shape)
                     state = EnergyState(
                         old_state.el_all.at[:steps_to_set].set(
                             ckpt_content["el_all"][:steps_to_set]
