@@ -201,6 +201,8 @@ class SavingCheckpointManager(CheckpointManager):
         state: EnergyState,
         force_save: bool = False,
     ) -> None:
+        logging.log_every_n_seconds(logging.INFO, "Loop %s", 5, i)
+
         if not force_save:
             current_time = time.time()
             if current_time - self.previous_ckpt_time < self.save_interval:
