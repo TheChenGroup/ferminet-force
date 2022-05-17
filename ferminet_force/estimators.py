@@ -131,7 +131,7 @@ class EstimatorWithEnergy(ABC):
             e_l: Local energy
 
         Returns:
-            hf_term: Shape (natom, ndim). First 2 terms, aka Helmann-Fynmann term.
+            hf_term: Shape (natom, ndim). First 2 terms, aka Hellmann-Feynman term.
             el_term: Shape (natom, ndim). The term containing E_L.
             ev_term_coeff: Shape (natom, ndim). Coefficient of E_v term.
         """
