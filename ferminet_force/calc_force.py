@@ -262,6 +262,8 @@ class LocalEnergySolver(Solver):
         # Don't use mean of ev_term_coeff_all, because it will increase fluctuations
         product = state.ev_term_coeff_all * energy_mean
         return {
+            # force_all is actually hf_term_all
+            # the name is just to keep function signature the same
             "force": force_all + state.el_term_all + product,
             # hf_term can be calculated by `force - pulay_term`
             "pulay_term": state.el_term_all + product,
