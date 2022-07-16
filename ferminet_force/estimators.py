@@ -18,7 +18,7 @@ from functools import partial
 
 import jax
 import jax.numpy as jnp
-from ferminet import hamiltonian, networks
+from ferminet import networks
 
 from ._typing import LogFermiNetLike, LogFermiNetLikeWithAtoms, ParamTree
 from .restore_network import PartialNetwork
@@ -203,96 +203,6 @@ class PsiMinZVZBEstimator(PsiMinEstimatorBase, EstimatorWithEnergy):
         return f_zv, -2 * e_l * Qx, 2 * Qx
 
 
-class PsiDerivEstimatorBase(LocalForceEstimatorBase):
-    r"""The base class for estimators needs the derivative of \log{|\Psi|}.
-
-    Also based on R. Assaraf and M. Caffarel, J. Chem. Phys. 119, 10536 (2003).
-
-    WARNING: The calculation of the derivative is not following the paper, and the
-    result does not look good. Only here for reference.
-    """
-
-    def __init__(self, f: LogFermiNetLike, atoms: jnp.ndarray, charges: jnp.ndarray):
-        super().__init__(f, atoms, charges)
-
-        f_with_atoms = PartialNetwork(f)
-        del f_with_atoms.keywords["atoms"]
-        # Remind f returns the log magnitude of the wavefunction
-        grad_f_atoms = jax.grad(f_with_atoms, argnums=2)
-        # Note \frac{\partial}{\partial \lambda} = - \frac{\partial}{\partial R}
-        self.f_deriv = lambda params, x: grad_f_atoms(params, x, atoms)
-
-
-class PsiMinDerivEstimator(PsiDerivEstimatorBase, EstimatorWithEnergy):
-    """Eq. (82) in the paper.
-
-    WARNING: See PsiDerivEstimatorBase.
-    """
-
-    def __init__(self, f: LogFermiNetLike, atoms: jnp.ndarray, charges: jnp.ndarray):
-        super().__init__(f, atoms, charges)
-        self.zv_estimator = PsiMinZVEstimator(f, atoms, charges)
-
-    def f_l(
-        self, params: jnp.ndarray, x: jnp.ndarray, e_l: jnp.ndarray
-    ) -> tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]:
-        f_zv = self.zv_estimator.f_l(params, x)
-        f_deriv_val = self.f_deriv(params, x)
-        return f_zv, -2 * e_l * f_deriv_val, 2 * f_deriv_val
-
-
-def extended_local_kinetic_energy(f, shape):
-    """Extend the local kinetic energy to allow non-scalar output.
-
-    Used by PsiDerivEstimator.
-    """
-
-    def _lapl_over_f(params, x):
-        n = x.shape[0]
-        eye = jnp.eye(n)
-        grad_f = jax.jacfwd(f, argnums=1)
-        grad_f_closure = partial(grad_f, params)
-
-        def _body_fun(i, val):
-            primal, tangent = jax.jvp(grad_f_closure, (x,), (eye[i],))
-            return val + primal[..., i] ** 2 + tangent[..., i]
-
-        return -0.5 * jax.lax.fori_loop(0, n, _body_fun, jnp.zeros(shape))
-
-    return _lapl_over_f
-
-
-class PsiDerivEstimator(PsiDerivEstimatorBase, EstimatorWithEnergy):
-    """Eq. (79) in the paper with v=0.
-
-    WARNING: See PsiDerivEstimatorBase.
-    """
-
-    def __init__(self, f: LogFermiNetLike, atoms: jnp.ndarray, charges: jnp.ndarray):
-        super().__init__(f, atoms, charges)
-        self.deriv_ke = extended_local_kinetic_energy(
-            # log(\psi')
-            lambda params, x: jnp.log(jnp.abs(self.f_deriv(params, x))) + f(params, x),
-            (len(atoms), 3),
-        )
-
-    def f_l(
-        self, params: jnp.ndarray, x: jnp.ndarray, e_l: jnp.ndarray
-    ) -> tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]:
-        ae, _, r_ae, r_ee = networks.construct_input_features(x, self.atoms)
-        deriv_potential = hamiltonian.potential_energy(
-            r_ae, r_ee, self.atoms, self.charges
-        )
-        deriv_e_l = deriv_potential + self.deriv_ke(params, x)
-        deriv_val = self.f_deriv(params, x)
-        return (
-            primitive_force(ae, r_ae, self.atoms, self.charges)
-            + (deriv_e_l - e_l) * deriv_val,
-            -2 * e_l * deriv_val,
-            2 * deriv_val,
-        )
-
-
 def local_kinetic_energy(f: LogFermiNetLikeWithAtoms):
     """Basically the same as the original one, but exposed atoms"""
 
@@ -436,11 +346,71 @@ class SWCTEstimator(SWCTBase, EstimatorWithEnergy):
         return hf_term, -e_l * ev_term_coeff, ev_term_coeff
 
 
+# =========== Below estimators are not really estimators ===========
+
+
+class EmptyEstimator(LocalForceEstimatorBase, EstimatorWithoutEnergy):
+    def f_l(self, params: jnp.ndarray, x: jnp.ndarray) -> jnp.ndarray:
+        return jnp.zeros((len(self.atoms), 3))
+
+
+class NoSWCTEstimator(LocalEnergyDerivBase, EstimatorWithEnergy):
+    def f_l(
+        self, params: jnp.ndarray, x: jnp.ndarray, e_l: jnp.ndarray
+    ) -> tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]:
+        hf_term = -self.el_deriv_atom(params, x)
+        ev_term_coeff = 2 * self.f_deriv_atom(params, x)
+        return hf_term, -e_l * ev_term_coeff, ev_term_coeff
+
+
+class SWCTHFEstimator(SWCTBase, EstimatorWithoutEnergy):
+    def f_l(self, params: jnp.ndarray, x: jnp.ndarray) -> jnp.ndarray:
+        omega_mat = self.omega(x)
+        hf_term = -(
+            self.el_deriv_atom(params, x)
+            + jnp.sum(omega_mat * self.el_deriv_elec(params, x), axis=0)
+        )
+        return hf_term
+
+
+class SWCTPulayEstimator(SWCTBase, EstimatorWithEnergy):
+    """Space warp coordinate transformation estimator.
+
+    Eq. (14) of S. Sorella and L. Capriotti, J. Chem. Phys. 133, 234111 (2010).
+    """
+
+    def f_l(
+        self, params: jnp.ndarray, x: jnp.ndarray, e_l: jnp.ndarray
+    ) -> tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]:
+        omega_mat = self.omega(x)
+        omega_grad = self.omega_jacfwd(jnp.reshape(x, (-1, 3)))
+        ev_term_coeff = 2 * (
+            self.f_deriv_atom(params, x)
+            + jnp.sum(omega_mat * self.f_deriv_elec(params, x) + omega_grad / 2, axis=0)
+        )
+        return jnp.zeros((len(self.atoms), 3)), -e_l * ev_term_coeff, ev_term_coeff
+
+
+class SWCTNaiveHFEstimator(SWCTBase, EstimatorWithoutEnergy):
+    def f_l(self, params: jnp.ndarray, x: jnp.ndarray) -> jnp.ndarray:
+        return -self.el_deriv_atom(params, x)
+
+
+class SWCTWarpHFEstimator(SWCTBase, EstimatorWithoutEnergy):
+    def f_l(self, params: jnp.ndarray, x: jnp.ndarray) -> jnp.ndarray:
+        return -jnp.sum(self.omega(x) * self.el_deriv_elec(params, x), axis=0)
+
+
 all_estimators = {
     "prim": PrimitiveEstimator,
     "zv": PsiMinZVEstimator,
     "zvzb": PsiMinZVZBEstimator,
-    "min_deriv": PsiMinDerivEstimator,
-    "deriv": PsiDerivEstimator,
     "swct": SWCTEstimator,
+    # below estimators are not really estimators
+    "empty": EmptyEstimator,
+    "no-swct": NoSWCTEstimator,
+    "swct-hf": SWCTHFEstimator,
+    "swct-hf-naive-term": SWCTNaiveHFEstimator,
+    "swct-hf-warp-term": SWCTWarpHFEstimator,
+    "swct-pulay": SWCTPulayEstimator,
 }
