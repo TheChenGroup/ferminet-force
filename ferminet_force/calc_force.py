@@ -14,7 +14,7 @@
 
 import time
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any, Optional, Union
 
 import ferminet.constants
 import ferminet.mcmc
@@ -24,7 +24,7 @@ from jax import numpy as jnp
 
 from ._typing import EnergyState
 from .checkpoint import CheckpointManager, SimpleCheckpointManager
-from .estimators import EstimatorWithEnergy
+from .estimators import EstimatorWithEnergy, EstimatorWithoutEnergy
 from .restore_network import restore_network
 
 if TYPE_CHECKING:
@@ -46,7 +46,7 @@ def make_different_rng_key_on_all_devices(
 
 def calc_force(
     cfg: "ConfigDict",
-    estimator_class,
+    estimator_class: Union[type[EstimatorWithEnergy], type[EstimatorWithoutEnergy]],
     steps: int = 10,
     mcmc_steps: int = 10,
     mcmc_burn_in: int = 100,

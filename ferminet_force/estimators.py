@@ -83,9 +83,8 @@ def primitive_force(ae, r_ae, atoms, charges):
     return f_aa + f_ae
 
 
-class LocalForceEstimatorBase(ABC):
-    """The base class for local force estimators."""
-
+class EstimatorInit(ABC):
+    @abstractmethod
     def __init__(self, f: LogFermiNetLike, atoms: jnp.ndarray, charges: jnp.ndarray):
         """creates function to evaluate the local force.
 
@@ -95,12 +94,9 @@ class LocalForceEstimatorBase(ABC):
             atoms: Shape (natom, ndim). Positions of the atoms.
             charges: Shape (natom). Nuclear charges of the atoms.
         """
-        self.f = f
-        self.atoms = atoms
-        self.charges = charges
 
 
-class EstimatorWithoutEnergy(ABC):
+class EstimatorWithoutEnergy(EstimatorInit, ABC):
     """The base class for estimators which do not require local energy."""
 
     @abstractmethod
@@ -116,7 +112,7 @@ class EstimatorWithoutEnergy(ABC):
         """
 
 
-class EstimatorWithEnergy(ABC):
+class EstimatorWithEnergy(EstimatorInit, ABC):
     """The base class for estimators which require local energy."""
 
     @abstractmethod
@@ -135,6 +131,15 @@ class EstimatorWithEnergy(ABC):
             el_term: Shape (natom, ndim). The term containing E_L.
             ev_term_coeff: Shape (natom, ndim). Coefficient of E_v term.
         """
+
+
+class LocalForceEstimatorBase(ABC):
+    """The base class for local force estimators."""
+
+    def __init__(self, f: LogFermiNetLike, atoms: jnp.ndarray, charges: jnp.ndarray):
+        self.f = f
+        self.atoms = atoms
+        self.charges = charges
 
 
 class PrimitiveEstimator(LocalForceEstimatorBase, EstimatorWithoutEnergy):
