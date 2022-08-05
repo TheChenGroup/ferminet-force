@@ -13,12 +13,15 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from __future__ import annotations
+
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, TypedDict
+from typing import TYPE_CHECKING, Any
 
 import jax.numpy as jnp
 import numpy as np
 from ferminet import envelopes, networks
+from typing_extensions import TypedDict
 
 if TYPE_CHECKING:
     from ml_collections import ConfigDict
@@ -42,7 +45,7 @@ class PartialNetwork:
     args: tuple
     keywords: dict[str, Any]
 
-    def __new__(cls, func, /, *args, **keywords):
+    def __new__(cls, func, *args, **keywords):
         if not callable(func):
             raise TypeError("the first argument must be callable")
 
@@ -58,7 +61,7 @@ class PartialNetwork:
         self.keywords = keywords
         return self
 
-    def __call__(self, /, *args, **keywords):
+    def __call__(self, *args, **keywords):
         keywords = {**self.keywords, **keywords}
         # Often just need log|psi(x)|.
         return self.func(*self.args, *args, **keywords)[1]

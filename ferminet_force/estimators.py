@@ -13,15 +13,20 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from __future__ import annotations
+
 from abc import ABC, abstractmethod
 from functools import partial
+from typing import TYPE_CHECKING
 
 import jax
 import jax.numpy as jnp
 from ferminet import networks
 
-from ._typing import LogFermiNetLike, LogFermiNetLikeWithAtoms, ParamTree
 from .restore_network import PartialNetwork
+
+if TYPE_CHECKING:
+    from ._typing import LogFermiNetLikeWithAtoms
 
 
 def primitive_f_aa(atoms, charges):
@@ -85,7 +90,9 @@ def primitive_force(ae, r_ae, atoms, charges):
 
 class EstimatorInit(ABC):
     @abstractmethod
-    def __init__(self, f: LogFermiNetLike, atoms: jnp.ndarray, charges: jnp.ndarray):
+    def __init__(
+        self, f: networks.LogFermiNetLike, atoms: jnp.ndarray, charges: jnp.ndarray
+    ):
         """creates function to evaluate the local force.
 
         Args:
@@ -136,7 +143,9 @@ class EstimatorWithEnergy(EstimatorInit, ABC):
 class LocalForceEstimatorBase(ABC):
     """The base class for local force estimators."""
 
-    def __init__(self, f: LogFermiNetLike, atoms: jnp.ndarray, charges: jnp.ndarray):
+    def __init__(
+        self, f: networks.LogFermiNetLike, atoms: jnp.ndarray, charges: jnp.ndarray
+    ):
         self.f = f
         self.atoms = atoms
         self.charges = charges
@@ -157,7 +166,9 @@ class PsiMinEstimatorBase(LocalForceEstimatorBase):
     Based on R. Assaraf and M. Caffarel, J. Chem. Phys. 119, 10536 (2003).
     """
 
-    def __init__(self, f: LogFermiNetLike, atoms: jnp.ndarray, charges: jnp.ndarray):
+    def __init__(
+        self, f: networks.LogFermiNetLike, atoms: jnp.ndarray, charges: jnp.ndarray
+    ):
         super().__init__(f, atoms, charges)
 
         def Q(x):
@@ -178,7 +189,9 @@ class PsiMinZVEstimator(PsiMinEstimatorBase, EstimatorWithoutEnergy):
     This estimator does not require local energy.
     """
 
-    def __init__(self, f: LogFermiNetLike, atoms: jnp.ndarray, charges: jnp.ndarray):
+    def __init__(
+        self, f: networks.LogFermiNetLike, atoms: jnp.ndarray, charges: jnp.ndarray
+    ):
         super().__init__(f, atoms, charges)
         self.grad_Q = jax.jacfwd(self.Q)
         self.grad_f = jax.grad(f, argnums=1)
@@ -196,7 +209,9 @@ class PsiMinZVZBEstimator(PsiMinEstimatorBase, EstimatorWithEnergy):
     This estimator requires local energy.
     """
 
-    def __init__(self, f: LogFermiNetLike, atoms: jnp.ndarray, charges: jnp.ndarray):
+    def __init__(
+        self, f: networks.LogFermiNetLike, atoms: jnp.ndarray, charges: jnp.ndarray
+    ):
         super().__init__(f, atoms, charges)
         self.zv_estimator = PsiMinZVEstimator(f, atoms, charges)
 
@@ -240,14 +255,18 @@ def potential_energy(r_ae, r_ee, atoms, charges):
     return v_ee + v_ae + v_aa
 
 
-def local_energy_atom_exposed(f: LogFermiNetLikeWithAtoms, charges: jnp.ndarray):
+def local_energy_atom_exposed(
+    f: networks.LogFermiNetLikeWithAtoms, charges: jnp.ndarray
+):
     """Creates the function to evaluate the local energy, with `atoms` exposed.
 
     Also removed some unused args.
     """
     ke = local_kinetic_energy(f)
 
-    def _e_l(params: ParamTree, data: jnp.ndarray, atoms: jnp.ndarray) -> jnp.ndarray:
+    def _e_l(
+        params: networks.ParamTree, data: jnp.ndarray, atoms: jnp.ndarray
+    ) -> jnp.ndarray:
         """Basically the same as the original one, but fixed r_ee for grad"""
         _, _, r_ae, _ = networks.construct_input_features(data, atoms)
         ee = jnp.reshape(data, (1, -1, 3)) - jnp.reshape(data, (-1, 1, 3))
@@ -266,7 +285,9 @@ def local_energy_atom_exposed(f: LogFermiNetLikeWithAtoms, charges: jnp.ndarray)
 class LocalEnergyDerivBase(LocalForceEstimatorBase):
     """The base class prepares the derivative of the local energy and wave function."""
 
-    def __init__(self, f: LogFermiNetLike, atoms: jnp.ndarray, charges: jnp.ndarray):
+    def __init__(
+        self, f: networks.LogFermiNetLike, atoms: jnp.ndarray, charges: jnp.ndarray
+    ):
         super().__init__(f, atoms, charges)
 
         grad_f_elec = jax.grad(f, argnums=1)

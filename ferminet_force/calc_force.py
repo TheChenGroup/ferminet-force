@@ -12,6 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from __future__ import annotations
+
 import time
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, Any, Optional, Union
@@ -22,7 +24,7 @@ import jax
 from ferminet import hamiltonian
 from jax import numpy as jnp
 
-from ._typing import EnergyState
+from ._typing import EnergyState, InferrenceStepVal
 from .checkpoint import CheckpointManager, SimpleCheckpointManager
 from .estimators import EstimatorWithEnergy, EstimatorWithoutEnergy
 from .restore_network import restore_network
@@ -109,10 +111,6 @@ def calc_force(
         solver = LocalEnergySolver(estimator.f_l, el_fun, split_chunks)
     else:
         solver = SimpleSolver(estimator.f_l, split_chunks)
-
-    InferrenceStepVal = tuple[
-        "jax.random.KeyArray", jnp.ndarray, jnp.ndarray, EnergyState
-    ]
 
     def inferrence_step(i: jnp.int64, val: InferrenceStepVal) -> InferrenceStepVal:
         sharded_key, data, force_all, state = val

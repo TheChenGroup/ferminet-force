@@ -13,11 +13,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from typing import NamedTuple, Protocol, Tuple
+from __future__ import annotations
 
+from typing import NamedTuple, Tuple
+
+import jax
+from ferminet import networks
 from jax import numpy as jnp
-
-ParamTree = jnp.ndarray
+from typing_extensions import Protocol
 
 
 class EnergyState(NamedTuple):
@@ -26,31 +29,12 @@ class EnergyState(NamedTuple):
     ev_term_coeff_all: jnp.ndarray
 
 
-class FermiNetLike(Protocol):
-    def __call__(
-        self, params: ParamTree, electrons: jnp.ndarray
-    ) -> Tuple[jnp.ndarray, jnp.ndarray]:
-        """Returns the sign and log magnitude of the wavefunction.
-        Args:
-          params: network parameters.
-          electrons: electron positions, shape (nelectrons*ndim), where ndim is the
-            dimensionality of the system.
-        """
-
-
-class LogFermiNetLike(Protocol):
-    def __call__(self, params: ParamTree, electrons: jnp.ndarray) -> jnp.ndarray:
-        """Returns the log magnitude of the wavefunction.
-        Args:
-          params: network parameters.
-          electrons: electron positions, shape (nelectrons*ndim), where ndim is the
-            dimensionality of the system.
-        """
+InferrenceStepVal = Tuple[jax.random.KeyArray, jnp.ndarray, jnp.ndarray, EnergyState]
 
 
 class LogFermiNetLikeWithAtoms(Protocol):
     def __call__(
-        self, params: ParamTree, electrons: jnp.ndarray, atoms: jnp.ndarray
+        self, params: networks.ParamTree, electrons: jnp.ndarray, atoms: jnp.ndarray
     ) -> jnp.ndarray:
         """Returns the log magnitude of the wavefunction.
 
