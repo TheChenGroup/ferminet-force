@@ -90,6 +90,7 @@ def calc_force(
     restored_params = restore_network(cfg)
     atoms = restored_params["atoms"]
     charges = restored_params["charges"]
+    signed_network = restored_params["signed_network"]
     network = restored_params["network"]
     params = restored_params["params"]
     data = restored_params["data"]
@@ -102,7 +103,9 @@ def calc_force(
     estimator = estimator_class(network, atoms, charges)
     solver: Solver
     if issubclass(estimator_class, EstimatorWithEnergy):
-        el_fun = hamiltonian.local_energy(network, atoms, charges)
+        el_fun = hamiltonian.local_energy(
+            signed_network, atoms, charges, nspins=cfg.system.electrons
+        )
         solver = LocalEnergySolver(estimator.f_l, el_fun, split_chunks)
     else:
         solver = SimpleSolver(estimator.f_l, split_chunks)
@@ -223,13 +226,14 @@ class LocalEnergySolver(Solver):
             jax.vmap(fl_fun, in_axes=(None, 0, 0), out_axes=0)
         )
         self.batch_local_energy = jax.pmap(
-            jax.vmap(el_fun, in_axes=(None, 0), out_axes=0)
+            jax.vmap(el_fun, in_axes=(None, 0, 0), out_axes=0),
+            in_axes=(0, None, 0),
         )
 
     def local_force(
         self, i: jnp.int64, params: jnp.ndarray, data: jnp.ndarray, state: EnergyState
     ) -> tuple[jnp.ndarray, EnergyState]:
-        e_l = self.batch_local_energy(params, data)
+        e_l = self.batch_local_energy(params, None, data)
         if self.split_chunks is not None:
             hf_term, el_term, ev_term_coeff = [
                 jnp.concatenate(x)

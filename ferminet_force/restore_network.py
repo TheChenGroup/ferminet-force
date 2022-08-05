@@ -18,9 +18,7 @@ from typing import TYPE_CHECKING, Any, TypedDict
 
 import jax.numpy as jnp
 import numpy as np
-from ferminet import networks
-
-from ._typing import FermiNetLike, LogFermiNetLike
+from ferminet import envelopes, networks
 
 if TYPE_CHECKING:
     from ml_collections import ConfigDict
@@ -30,8 +28,8 @@ if TYPE_CHECKING:
 class RestoredParams(TypedDict):
     atoms: jnp.ndarray
     charges: jnp.ndarray
-    network: LogFermiNetLike
-    signed_network: FermiNetLike
+    network: networks.LogFermiNetLike
+    signed_network: networks.FermiNetLike
     params: networks.ParamTree
     data: jnp.ndarray
     t_init: int
@@ -98,17 +96,23 @@ def restore_network(cfg: "ConfigDict") -> RestoredParams:
     charges = jnp.array([atom.charge for atom in cfg.system.molecule])
     spins = cfg.system.electrons
 
-    _, signed_network = networks.make_fermi_net(
+    _, signed_network, _ = networks.make_fermi_net(
         atoms,
         spins,
         charges,
-        envelope_type=cfg.network.envelope_type,
+        envelope=envelopes.make_isotropic_envelope(),
+        feature_layer=networks.make_ferminet_features(
+            charges,
+            cfg.system.electrons,
+            cfg.system.ndim,
+        ),
         bias_orbitals=cfg.network.bias_orbitals,
         use_last_layer=cfg.network.use_last_layer,
         hf_solution=None,
         full_det=cfg.network.full_det,
         **cfg.network.detnet,
     )
+
     network = PartialNetwork(signed_network)
 
     return {

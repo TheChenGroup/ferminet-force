@@ -17,7 +17,7 @@ from ferminet.base_config import default
 from ferminet.train import train
 from ferminet.utils import system
 from ferminet_force import calc_force
-from ferminet_force.estimators import PsiMinZVZBEstimator
+from ferminet_force.estimators import SWCTEstimator
 from jax import numpy as jnp
 
 cfg = default()
@@ -37,7 +37,7 @@ cfg.batch_size = 16
 
 train(cfg)
 
-result = calc_force(cfg, PsiMinZVZBEstimator, steps=2, mcmc_steps=1, mcmc_burn_in=1)
+result = calc_force(cfg, SWCTEstimator, steps=2, mcmc_steps=1, mcmc_burn_in=1)
 
 jnp.savez("data/force", **result)
 force_all = result["force"]
