@@ -61,13 +61,14 @@ def calc_force(
 
     Args:
         cfg: Bare FermiNet config object.
-        create_fl_fun: Callable with signature f(network, atoms, charges) which
-            returns function fl_fun with signature fl_fun(params, x)
+        estimator_class: An estimator class. See estimators.py for detail.
         steps (int, optional): Steps to run inferrence. Defaults to 10.
         mcmc_steps (int, optional): Steps to run MCMC. Defaults to 10.
         mcmc_burn_in (int, optional): Burn in steps for MCMC. Defaults to 100.
         split_chunks (int, optional): Number of chunks to split the data into.
             Useful when memory is limited. Defaults to None, which means no split.
+        random_seed (int, optional): The random seed for Monte Carlo simulation.
+        checkpoint_mgr (CheckpointManager, optional): The checkpoint manager.
         jit_loop (bool, optional): Whether to use JIT-ed loop. Defaults to False.
 
     Returns:
