@@ -15,13 +15,14 @@
 
 from __future__ import annotations
 
-from abc import ABC, abstractmethod
+from abc import abstractmethod
 from functools import partial
 from typing import TYPE_CHECKING
 
 import jax
 import jax.numpy as jnp
 from ferminet import networks
+from typing_extensions import Protocol
 
 from .restore_network import PartialNetwork
 
@@ -88,8 +89,9 @@ def primitive_force(ae, r_ae, atoms, charges):
     return f_aa + f_ae
 
 
-class EstimatorInit(ABC):
-    @abstractmethod
+class EstimatorWithoutEnergy(Protocol):
+    """The base class for estimators which do not require local energy."""
+
     def __init__(
         self, f: networks.LogFermiNetLike, atoms: jnp.ndarray, charges: jnp.ndarray
     ):
@@ -102,13 +104,9 @@ class EstimatorInit(ABC):
             charges: Shape (natom). Nuclear charges of the atoms.
         """
 
-
-class EstimatorWithoutEnergy(EstimatorInit, ABC):
-    """The base class for estimators which do not require local energy."""
-
     @abstractmethod
-    def f_l(self, params: jnp.ndarray, x: jnp.ndarray) -> jnp.ndarray:
-        """Calculates the total force.
+    def hfm_force(self, params: jnp.ndarray, x: jnp.ndarray) -> jnp.ndarray:
+        """Calculates the HFM force.
 
         Args:
             params: network parameters.
@@ -119,14 +117,14 @@ class EstimatorWithoutEnergy(EstimatorInit, ABC):
         """
 
 
-class EstimatorWithEnergy(EstimatorInit, ABC):
+class EstimatorWithEnergy(EstimatorWithoutEnergy, Protocol):
     """The base class for estimators which require local energy."""
 
     @abstractmethod
-    def f_l(
+    def pulay_force(
         self, params: jnp.ndarray, x: jnp.ndarray, e_l: jnp.ndarray
-    ) -> tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]:
-        """Calculates the total force.
+    ) -> tuple[jnp.ndarray, jnp.ndarray]:
+        """Calculates the pulay force.
 
         Args:
             params: network parameters.
@@ -134,15 +132,12 @@ class EstimatorWithEnergy(EstimatorInit, ABC):
             e_l: Local energy
 
         Returns:
-            hf_term: Shape (natom, ndim). First 2 terms, aka Hellmann-Feynman term.
             el_term: Shape (natom, ndim). The term containing E_L.
             ev_term_coeff: Shape (natom, ndim). Coefficient of E_v term.
         """
 
 
-class LocalForceEstimatorBase(ABC):
-    """The base class for local force estimators."""
-
+class EstimatorBase:
     def __init__(
         self, f: networks.LogFermiNetLike, atoms: jnp.ndarray, charges: jnp.ndarray
     ):
@@ -151,21 +146,15 @@ class LocalForceEstimatorBase(ABC):
         self.charges = charges
 
 
-class PrimitiveEstimator(LocalForceEstimatorBase, EstimatorWithoutEnergy):
+class PrimitiveEstimator(EstimatorBase):
     """The naive estimator."""
 
-    def f_l(self, params: jnp.ndarray, x: jnp.ndarray) -> jnp.ndarray:
+    def hfm_force(self, params: jnp.ndarray, x: jnp.ndarray) -> jnp.ndarray:
         ae, _, r_ae, _ = networks.construct_input_features(x, self.atoms)
         return primitive_force(ae, r_ae, self.atoms, self.charges)
 
 
-class PsiMinEstimatorBase(LocalForceEstimatorBase):
-    r"""The base class for estimators based on \tilde{\psi}_{min}
-
-    \tilde{\psi}_{min} is the "minimal" form removing the singular part.
-    Based on R. Assaraf and M. Caffarel, J. Chem. Phys. 119, 10536 (2003).
-    """
-
+class PsiMinBase(EstimatorBase):
     def __init__(
         self, f: networks.LogFermiNetLike, atoms: jnp.ndarray, charges: jnp.ndarray
     ):
@@ -180,47 +169,38 @@ class PsiMinEstimatorBase(LocalForceEstimatorBase):
             return jnp.sum(charges[..., None] * ae / r_ae, axis=0)
 
         self.Q = Q
+        self.grad_Q = jax.jacfwd(self.Q)
+        self.grad_f = jax.grad(f, argnums=1)
 
 
-class PsiMinZVEstimator(PsiMinEstimatorBase, EstimatorWithoutEnergy):
+class PsiMinZVEstimator(PsiMinBase):
     r"""Zero-variance estimator based on \tilde{\psi}_{min}.
+
+    \tilde{\psi}_{min} is the "minimal" form removing the singular part.
+    Based on R. Assaraf and M. Caffarel, J. Chem. Phys. 119, 10536 (2003).
 
     Or ZV estimator for short. Eq. (72) in the paper.
     This estimator does not require local energy.
     """
 
-    def __init__(
-        self, f: networks.LogFermiNetLike, atoms: jnp.ndarray, charges: jnp.ndarray
-    ):
-        super().__init__(f, atoms, charges)
-        self.grad_Q = jax.jacfwd(self.Q)
-        self.grad_f = jax.grad(f, argnums=1)
-
-    def f_l(self, params: jnp.ndarray, x: jnp.ndarray) -> jnp.ndarray:
+    def hfm_force(self, params: jnp.ndarray, x: jnp.ndarray) -> jnp.ndarray:
         f_aa = primitive_f_aa(self.atoms, self.charges)
         dot_term = jnp.dot(self.grad_Q(x), self.grad_f(params, x))
         return f_aa + dot_term
 
 
-class PsiMinZVZBEstimator(PsiMinEstimatorBase, EstimatorWithEnergy):
+class PsiMinZVZBEstimator(PsiMinZVEstimator):
     r"""Zero-variance zero-bias estimator based on \tilde{\psi}_{min}.
 
     Or ZVZB estimator for short.  Eq. (73) in the paper.
     This estimator requires local energy.
     """
 
-    def __init__(
-        self, f: networks.LogFermiNetLike, atoms: jnp.ndarray, charges: jnp.ndarray
-    ):
-        super().__init__(f, atoms, charges)
-        self.zv_estimator = PsiMinZVEstimator(f, atoms, charges)
-
-    def f_l(
+    def pulay_force(
         self, params: jnp.ndarray, x: jnp.ndarray, e_l: jnp.ndarray
-    ) -> tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]:
-        f_zv = self.zv_estimator.f_l(params, x)
+    ) -> tuple[jnp.ndarray, jnp.ndarray]:
         Qx = self.Q(x)
-        return f_zv, -2 * e_l * Qx, 2 * Qx
+        return -2 * e_l * Qx, 2 * Qx
 
 
 def local_kinetic_energy(f: LogFermiNetLikeWithAtoms):
@@ -255,9 +235,7 @@ def potential_energy(r_ae, r_ee, atoms, charges):
     return v_ee + v_ae + v_aa
 
 
-def local_energy_atom_exposed(
-    f: networks.LogFermiNetLikeWithAtoms, charges: jnp.ndarray
-):
+def local_energy_atom_exposed(f: LogFermiNetLikeWithAtoms, charges: jnp.ndarray):
     """Creates the function to evaluate the local energy, with `atoms` exposed.
 
     Also removed some unused args.
@@ -282,8 +260,8 @@ def local_energy_atom_exposed(
     return _e_l
 
 
-class LocalEnergyDerivBase(LocalForceEstimatorBase):
-    """The base class prepares the derivative of the local energy and wave function."""
+class SWCTBase(EstimatorBase):
+    """The base class which defines omega functions for the SWCT estimator."""
 
     def __init__(
         self, f: networks.LogFermiNetLike, atoms: jnp.ndarray, charges: jnp.ndarray
@@ -308,10 +286,6 @@ class LocalEnergyDerivBase(LocalForceEstimatorBase):
         self.el_deriv_elec = lambda params, x: jnp.reshape(
             grad_el_elec(params, x, atoms), (-1, 1, 3)
         )
-
-
-class SWCTBase(LocalEnergyDerivBase):
-    """The base class which defines omega functions for the SWCT estimator."""
 
     def omega(self, x: jnp.ndarray) -> jnp.ndarray:
         r"""Calculate the \omega matrix
@@ -350,47 +324,8 @@ class SWCTBase(LocalEnergyDerivBase):
         return 1 / r_ae**4
 
 
-class SWCTEstimator(SWCTBase, EstimatorWithEnergy):
-    """Space warp coordinate transformation estimator.
-
-    Eq. (14) of S. Sorella and L. Capriotti, J. Chem. Phys. 133, 234111 (2010).
-    """
-
-    def f_l(
-        self, params: jnp.ndarray, x: jnp.ndarray, e_l: jnp.ndarray
-    ) -> tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]:
-        omega_mat = self.omega(x)
-        omega_grad = self.omega_jacfwd(jnp.reshape(x, (-1, 3)))
-        hf_term = -(
-            self.el_deriv_atom(params, x)
-            + jnp.sum(omega_mat * self.el_deriv_elec(params, x), axis=0)
-        )
-        ev_term_coeff = 2 * (
-            self.f_deriv_atom(params, x)
-            + jnp.sum(omega_mat * self.f_deriv_elec(params, x) + omega_grad / 2, axis=0)
-        )
-        return hf_term, -e_l * ev_term_coeff, ev_term_coeff
-
-
-# =========== Below estimators are not really estimators ===========
-
-
-class EmptyEstimator(LocalForceEstimatorBase, EstimatorWithoutEnergy):
-    def f_l(self, params: jnp.ndarray, x: jnp.ndarray) -> jnp.ndarray:
-        return jnp.zeros((len(self.atoms), 3))
-
-
-class NoSWCTEstimator(LocalEnergyDerivBase, EstimatorWithEnergy):
-    def f_l(
-        self, params: jnp.ndarray, x: jnp.ndarray, e_l: jnp.ndarray
-    ) -> tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]:
-        hf_term = -self.el_deriv_atom(params, x)
-        ev_term_coeff = 2 * self.f_deriv_atom(params, x)
-        return hf_term, -e_l * ev_term_coeff, ev_term_coeff
-
-
-class SWCTHFEstimator(SWCTBase, EstimatorWithoutEnergy):
-    def f_l(self, params: jnp.ndarray, x: jnp.ndarray) -> jnp.ndarray:
+class SWCTHFEstimator(SWCTBase):
+    def hfm_force(self, params: jnp.ndarray, x: jnp.ndarray) -> jnp.ndarray:
         omega_mat = self.omega(x)
         hf_term = -(
             self.el_deriv_atom(params, x)
@@ -399,31 +334,69 @@ class SWCTHFEstimator(SWCTBase, EstimatorWithoutEnergy):
         return hf_term
 
 
-class SWCTPulayEstimator(SWCTBase, EstimatorWithEnergy):
+class SWCTEstimator(SWCTHFEstimator):
     """Space warp coordinate transformation estimator.
 
     Eq. (14) of S. Sorella and L. Capriotti, J. Chem. Phys. 133, 234111 (2010).
     """
 
-    def f_l(
+    def pulay_force(
         self, params: jnp.ndarray, x: jnp.ndarray, e_l: jnp.ndarray
-    ) -> tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]:
+    ) -> tuple[jnp.ndarray, jnp.ndarray]:
+        omega_mat = self.omega(x)
+        omega_grad = self.omega_jacfwd(jnp.reshape(x, (-1, 3)))
+
+        ev_term_coeff = 2 * (
+            self.f_deriv_atom(params, x)
+            + jnp.sum(omega_mat * self.f_deriv_elec(params, x) + omega_grad / 2, axis=0)
+        )
+        return -e_l * ev_term_coeff, ev_term_coeff
+
+
+# =========== Below estimators are not really estimators ===========
+
+
+class EmptyEstimator(EstimatorBase):
+    def hfm_force(self, params: jnp.ndarray, x: jnp.ndarray) -> jnp.ndarray:
+        return jnp.zeros((len(self.atoms), 3))
+
+
+class NoSWCTEstimator(SWCTHFEstimator):
+    def pulay_force(
+        self, params: jnp.ndarray, x: jnp.ndarray, e_l: jnp.ndarray
+    ) -> tuple[jnp.ndarray, jnp.ndarray]:
+        ev_term_coeff = 2 * self.f_deriv_atom(params, x)
+        return -e_l * ev_term_coeff, ev_term_coeff
+
+
+class SWCTPulayEstimator(SWCTBase):
+    """Space warp coordinate transformation estimator.
+
+    Eq. (14) of S. Sorella and L. Capriotti, J. Chem. Phys. 133, 234111 (2010).
+    """
+
+    def hfm_force(self, params: jnp.ndarray, x: jnp.ndarray) -> jnp.ndarray:
+        return jnp.zeros((len(self.atoms), 3))
+
+    def pulay_force(
+        self, params: jnp.ndarray, x: jnp.ndarray, e_l: jnp.ndarray
+    ) -> tuple[jnp.ndarray, jnp.ndarray]:
         omega_mat = self.omega(x)
         omega_grad = self.omega_jacfwd(jnp.reshape(x, (-1, 3)))
         ev_term_coeff = 2 * (
             self.f_deriv_atom(params, x)
             + jnp.sum(omega_mat * self.f_deriv_elec(params, x) + omega_grad / 2, axis=0)
         )
-        return jnp.zeros((len(self.atoms), 3)), -e_l * ev_term_coeff, ev_term_coeff
+        return -e_l * ev_term_coeff, ev_term_coeff
 
 
-class SWCTNaiveHFEstimator(SWCTBase, EstimatorWithoutEnergy):
-    def f_l(self, params: jnp.ndarray, x: jnp.ndarray) -> jnp.ndarray:
+class SWCTNaiveHFEstimator(SWCTBase):
+    def hfm_force(self, params: jnp.ndarray, x: jnp.ndarray) -> jnp.ndarray:
         return -self.el_deriv_atom(params, x)
 
 
-class SWCTWarpHFEstimator(SWCTBase, EstimatorWithoutEnergy):
-    def f_l(self, params: jnp.ndarray, x: jnp.ndarray) -> jnp.ndarray:
+class SWCTWarpHFEstimator(SWCTBase):
+    def hfm_force(self, params: jnp.ndarray, x: jnp.ndarray) -> jnp.ndarray:
         return -jnp.sum(self.omega(x) * self.el_deriv_elec(params, x), axis=0)
 
 

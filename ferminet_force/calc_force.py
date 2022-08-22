@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import time
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, Any, Optional, Union
+from typing import TYPE_CHECKING, Any, Optional, Union, cast
 
 import ferminet.constants
 import ferminet.mcmc
@@ -105,13 +105,15 @@ def calc_force(
 
     estimator = estimator_class(network, atoms, charges)
     solver: Solver
-    if issubclass(estimator_class, EstimatorWithEnergy):
+    if hasattr(estimator_class, "pulay_force"):
+        estimator = cast(EstimatorWithEnergy, estimator)
         el_fun = hamiltonian.local_energy(
             signed_network, atoms, charges, nspins=cfg.system.electrons
         )
-        solver = LocalEnergySolver(estimator.f_l, el_fun, split_chunks)
+        solver = LocalEnergySolver(estimator, el_fun, split_chunks)
     else:
-        solver = SimpleSolver(estimator.f_l, split_chunks)
+        estimator = cast(EstimatorWithoutEnergy, estimator)
+        solver = SimpleSolver(estimator, split_chunks)
 
     def inferrence_step(i: jnp.int64, val: InferrenceStepVal) -> InferrenceStepVal:
         sharded_key, data, force_all, state = val
@@ -169,8 +171,8 @@ def calc_force(
 
 
 class Solver(ABC):
-    def __init__(self, fl_fun):
-        self.fl_fun = fl_fun
+    def __init__(self, estimator: Union[EstimatorWithEnergy, EstimatorWithoutEnergy]):
+        self.estimator = estimator
 
     @abstractmethod
     def local_force(
@@ -187,11 +189,15 @@ class Solver(ABC):
 
 
 class SimpleSolver(Solver):
-    def __init__(self, fl_fun, split_chunks: Optional[int] = None):
-        super().__init__(fl_fun)
+    def __init__(
+        self,
+        estimator: EstimatorWithoutEnergy,
+        split_chunks: Optional[int] = None,
+    ):
+        super().__init__(estimator)
         self.split_chunks = split_chunks
-        self.batch_local_force = jax.pmap(
-            jax.vmap(fl_fun, in_axes=(None, 0), out_axes=0)
+        self.batch_hfm_force = jax.pmap(
+            jax.vmap(estimator.hfm_force, in_axes=(None, 0), out_axes=0)
         )
 
     def local_force(
@@ -200,13 +206,13 @@ class SimpleSolver(Solver):
         if self.split_chunks is not None:
             f_l = jnp.concatenate(
                 [
-                    self.batch_local_force(params, data_chunk)
+                    self.batch_hfm_force(params, data_chunk)
                     for data_chunk in jnp.split(data, self.split_chunks, axis=1)
                 ]
             )
 
         else:
-            f_l = self.batch_local_force(params, data)
+            f_l = self.batch_hfm_force(params, data)
         force_result = jnp.mean(f_l, axis=(0, 1))
         return force_result, state
 
@@ -218,11 +224,16 @@ class SimpleSolver(Solver):
 
 
 class LocalEnergySolver(Solver):
-    def __init__(self, fl_fun, el_fun, split_chunks: Optional[int] = None):
-        super().__init__(fl_fun)
+    def __init__(
+        self, estimator: EstimatorWithEnergy, el_fun, split_chunks: Optional[int] = None
+    ):
+        super().__init__(estimator)
         self.split_chunks = split_chunks
-        self.batch_local_force = jax.pmap(
-            jax.vmap(fl_fun, in_axes=(None, 0, 0), out_axes=0)
+        self.batch_hfm_force = jax.pmap(
+            jax.vmap(estimator.hfm_force, in_axes=(None, 0), out_axes=0)
+        )
+        self.batch_pulay_force = jax.pmap(
+            jax.vmap(estimator.pulay_force, in_axes=(None, 0, 0), out_axes=0)
         )
         self.batch_local_energy = jax.pmap(
             jax.vmap(el_fun, in_axes=(None, 0, 0), out_axes=0),
@@ -234,11 +245,17 @@ class LocalEnergySolver(Solver):
     ) -> tuple[jnp.ndarray, EnergyState]:
         e_l = self.batch_local_energy(params, None, data)
         if self.split_chunks is not None:
-            hf_term, el_term, ev_term_coeff = [
+            hf_term = jnp.concatenate(
+                [
+                    self.batch_hfm_force(params, data_chunk)
+                    for data_chunk in jnp.split(data, self.split_chunks, axis=1)
+                ]
+            )
+            el_term, ev_term_coeff = [
                 jnp.concatenate(x)
                 for x in zip(
                     *[
-                        self.batch_local_force(params, data_chunk, el_chunk)
+                        self.batch_pulay_force(params, data_chunk, el_chunk)
                         for (data_chunk, el_chunk) in zip(
                             jnp.split(data, self.split_chunks, axis=1),
                             jnp.split(e_l, self.split_chunks, axis=1),
@@ -247,7 +264,8 @@ class LocalEnergySolver(Solver):
                 )
             ]
         else:
-            hf_term, el_term, ev_term_coeff = self.batch_local_force(params, data, e_l)
+            hf_term = self.batch_hfm_force(params, data)
+            el_term, ev_term_coeff = self.batch_pulay_force(params, data, e_l)
         state = EnergyState(
             el_all=state.el_all.at[i].set(jnp.mean(e_l, axis=(0, 1))),
             el_term_all=state.el_term_all.at[i].set(jnp.mean(el_term, axis=(0, 1))),
