@@ -91,6 +91,8 @@ def restore_network(cfg: "ConfigDict") -> RestoredParams:
         ckpt_data = np.load(f, allow_pickle=True)
         data = ckpt_data["data"]
         params = ckpt_data["params"].tolist()
+        if "input" not in params:
+            params["input"] = {}
         t_init = ckpt_data["t"].tolist() + 1
         opt_state = ckpt_data["opt_state"].tolist()
         mcmc_width = jnp.array(ckpt_data["mcmc_width"].tolist())
