@@ -361,7 +361,10 @@ class EmptyEstimator(EstimatorBase):
         return jnp.zeros((len(self.atoms), 3))
 
 
-class NoSWCTEstimator(SWCTHFEstimator):
+class NoSWCTEstimator(SWCTBase):
+    def hfm_force(self, params: jnp.ndarray, x: jnp.ndarray) -> jnp.ndarray:
+        return -self.el_deriv_atom(params, x)
+
     def pulay_force(
         self, params: jnp.ndarray, x: jnp.ndarray, e_l: jnp.ndarray
     ) -> tuple[jnp.ndarray, jnp.ndarray]:
