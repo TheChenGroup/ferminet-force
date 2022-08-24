@@ -175,8 +175,9 @@ class SavingCheckpointManager(CheckpointManager):
                 ckpt_content = jnp.load(ckpt_file)
                 old_steps_to_run = len(ckpt_content["force_all"])
                 old_steps_have_run = jnp.sum(ckpt_content["force_all"][:, 0, 0] != 0)
+                # Allow equal steps to reexport report
                 assert (
-                    old_steps_have_run < steps
+                    old_steps_have_run <= steps
                 ), "We have already done that calculation!"
                 if old_steps_to_run != steps:
                     _, _, force_all, old_state = CheckpointManager.create_empty_state(
@@ -204,7 +205,7 @@ class SavingCheckpointManager(CheckpointManager):
                         ckpt_content["el_term_all"],
                         ckpt_content["ev_term_coeff_all"],
                     )
-                return ckpt_content["i"], ckpt_content["data"], force_all, state
+                return ckpt_content["i"] + 1, ckpt_content["data"], force_all, state
             except (OSError, EOFError, BadZipFile):
                 logging.info("Error loading %s. Trying next checkpoint...", ckpt_file)
 
@@ -226,10 +227,5 @@ class SavingCheckpointManager(CheckpointManager):
                 return
             self.previous_ckpt_time = current_time
 
-        jnp.savez(
-            self.save_path / f"force_{i:06}.npz",
-            i=i,
-            data=data,
-            force_all=force_all,
-            **state._asdict(),
-        )
+        ckpt_path = self.save_path / f"force_{i:06}.npz"
+        jnp.savez(ckpt_path, i=i, data=data, force_all=force_all, **state._asdict())

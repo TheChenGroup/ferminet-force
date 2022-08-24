@@ -150,12 +150,14 @@ def calc_force(
             init_step, steps, inferrence_step, init_val
         )
     else:
+        i: int | None = None
         for i in range(init_step, steps):
             sharded_key, data, force_all, state = inferrence_step(
                 i, (sharded_key, data, force_all, state)
             )
             checkpoint_mgr.save(i, data, force_all, state)
-        checkpoint_mgr.save(i, data, force_all, state, force_save=True)
+        if i is not None:
+            checkpoint_mgr.save(i, data, force_all, state, force_save=True)
 
     return {
         "metadata": {
