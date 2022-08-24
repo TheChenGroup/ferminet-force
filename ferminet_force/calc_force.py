@@ -279,7 +279,7 @@ class LocalEnergySolver(Solver):
     def finalize_force(
         force_all: jnp.ndarray, state: EnergyState
     ) -> dict[str, jnp.ndarray]:
-        energy_mean = jnp.mean(state.el_all, axis=0)
+        energy_mean = jnp.nanmean(state.el_all, axis=0)
         # Don't use mean of ev_term_coeff_all, because it will increase fluctuations
         product = state.ev_term_coeff_all * energy_mean
         return {
