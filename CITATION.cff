@@ -1,0 +1,31 @@
+cff-version: 1.2.0
+message: "Please consider citing this paper if you use this software"
+authors:
+- family-names: "Qian"
+  given-names: "Yubing"
+  orcid: "https://orcid.org/0000-0001-6980-163X"
+title: "My Research Software"
+version: 0.1.0
+date-released: 2023-07-27
+url: "https://github.com/TheChenGroup/ferminet-force"
+preferred-citation:
+  type: article
+  title: "Interatomic force from neural network based variational quantum Monte Carlo"
+  journal: "The Journal of Chemical Physics"
+  doi: "10.1063/5.0112344"
+  month: 10
+  start: 164104
+  issue: 16
+  volume: 157
+  year: 2022
+  authors:
+  - family-names: "Qian"
+    given-names: "Yubing"
+    orcid: "https://orcid.org/0000-0001-6980-163X"
+  - family-names: "Fu"
+    given-names: "Weizhong"
+  - family-names: "Ren"
+    given-names: "Weiluo"
+  - family-names: "Chen"
+    given-names: "Ji"
+    orcid: "https://orcid.org/0000-0003-1603-1963"
