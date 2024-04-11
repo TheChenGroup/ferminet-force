@@ -6,7 +6,8 @@ This is a package to calculate force in [FermiNet](https://github.com/deepmind/f
 
 This package only works with the `jax` branch of FermiNet, and make sure you store the last checkpoint when training. You also need JAX version like `0.2.28`.
 
-The code was developed before my internship at ByteDance, and this repo is unlikely to update. However, many features are added to the internal version in ByteDance, including support for different neural networks and calculation of some other physical quantities. That code is still under development.
+> [!TIP]
+> A new version is available at [bytedance/netbos](github.com/bytedance/netobs), where many features are added, including support for different neural networks and calculation of some other physical quantities.
 
 ## Installation
 
