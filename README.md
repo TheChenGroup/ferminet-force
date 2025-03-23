@@ -1,6 +1,6 @@
 # Calculating Force in FermiNet
 
-This is a package to calculate force in [FermiNet](https://github.com/deepmind/ferminet)
+This repository contains the codebase for the paper [Interatomic force from neural network based variational quantum Monte Carlo](https://doi.org/10.1063/5.0112344). If you use this code in your work, please [cite our paper](#citation).
 
 ## Note
 
@@ -23,8 +23,6 @@ Note that this will not install the FermiNet package.
 See `example/main.py`
 
 ## Citation
-
-Please consider citing the paper:
 
 ```bibtex
 @article{qian_interatomic_2022,
